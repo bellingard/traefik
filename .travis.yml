@@ -1,11 +1,11 @@
-sudo: required
-dist: trusty
+language: go
+
+go: "1.10"
 
 git:
   depth: false
 
-services:
-  - docker
+go_import_path: github.com/containous/traefik
 
 env:
   global:
@@ -14,50 +14,26 @@ env:
     - CODENAME: tetedemoine
     - N_MAKE_JOBS: 2
 
-script:
-- echo "Skipping tests... (Tests are executed on SemaphoreCI)"
+addons:
+  sonarcloud:
+    organization: "bellingard"
+    token:
+      secure: "QtpvnhFJ0FL/l+QrJmph6hOYxS68aksxUrm7gsqH3oMfLAGcnM+ts41EUkS8FGi5ZOgNHs6NpNCtSJ/hjHx0xSNldEOVCx2LGOIGcHaTTIp1cbSJZ8bclJIYqRQUZLOD08zXBTHU1s+WwIpSq6z1qd7kbZ4RtZbCcHK4tQCUVkygIuEQfiCnPGlcTh2L1CpsFmIRQzV45iKB65LoP5y/f+RQCt13TI9wAKSnsjNlNlcAmu155dVsQhRJaQs1UtBu0TUcPnr4TRsq7ZfwsM42sKy0F29qVkiCg20D0fMLaEoAtyXHQ131U20wRenp0+rJaVqnXS0MuZ9MzxhEaJxzRwcUY0xPfds6st3fvGCEBVrngwkoDXmucTMavNrQQPcFUxDDZy/Y/7kTuNowotRlZKmhBuXJK5zPlTJcXIE30y91OS1rjKBxHPuDWAPwNhPOwWH6pD2l36gP9TL+8NHoCGA28YPkY97PZwXXQl0fh42dw1snyR8CFjHB03ImkJ4ElNo4aXpf4dq9XhevSvDDyc1skwetpV2sLo2Lq4xSgqVrBd4ov7Z3+TbRVeDyfphPEiMa0mJnCP9r8TpA+Byn81hIP979KHZ5fxB7OIyElK/cQ70CbRsYTPPTsyCkmHDoc4kTTwZ+CZM3ivXXG2y8kfOP++hu7p0YXCOpOfSKYmI="
+      
+install:
+  # Installs Go Meta Linter (Golint and Go vet are also supported independently)
+  - go get -u gopkg.in/alecthomas/gometalinter.v2
+  - $GOPATH/bin/gometalinter.v2 --install
 
-before_deploy:
-  - >
-    if ! [ "$BEFORE_DEPLOY_RUN" ]; then
-      export BEFORE_DEPLOY_RUN=1;
-      sudo -E apt-get -yq update;
-      sudo -E apt-get -yq --no-install-suggests --no-install-recommends --force-yes install docker-ce=${DOCKER_VERSION}*;
-      docker version;
-      make image;
-      if [ "$TRAVIS_TAG" ]; then
-        make -j${N_MAKE_JOBS} crossbinary-parallel;
-        tar cfz dist/traefik-${VERSION}.src.tar.gz --exclude-vcs --exclude dist .;
-      fi;
-      curl -sI https://github.com/containous/structor/releases/latest | grep -Fi Location  | tr -d '\r' | sed "s/tag/download/g" | awk -F " " '{ print $2 "/structor_linux-amd64"}' | wget --output-document=$GOPATH/bin/structor -i -;
-      chmod +x $GOPATH/bin/structor;
-      structor -o containous -r traefik --dockerfile-url="https://raw.githubusercontent.com/containous/traefik/master/docs.Dockerfile" --menu.js-url="https://raw.githubusercontent.com/containous/structor/master/traefik-menu.js.gotmpl" --rqts-url="https://raw.githubusercontent.com/containous/structor/master/requirements-override.txt" --exp-branch=master --debug;
-    fi
-deploy:
-  - provider: releases
-    api_key: ${GITHUB_TOKEN}
-    file: dist/traefik*
-    skip_cleanup: true
-    file_glob: true
-    on:
-      repo: containous/traefik
-      tags: true
-  - provider: script
-    script: sh script/deploy.sh
-    skip_cleanup: true
-    on:
-      repo: containous/traefik
-      tags: true
-  - provider: script
-    script: sh script/deploy-docker.sh
-    skip_cleanup: true
-    on:
-      repo: containous/traefik
-  - provider: pages
-    edge: false
-    github_token: ${GITHUB_TOKEN}
-    local_dir: site
-    skip_cleanup: true
-    on:
-      repo: containous/traefik
-      all_branches: true
+script:
+  # Execute Go Meta Linter
+  - $GOPATH/bin/gometalinter.v2 ./... > gometalinter-report.out || true
+  # Execute tests and coverage
+  - go test -json > report.json
+  - go test -coverprofile=coverage.out
+  # And then execute SonarCloud analysis which will run its own code analysis, and also reuse the linters' results
+  - sonar-scanner
+
+cache:
+  directories:
+    - '$HOME/.sonar/cache'
